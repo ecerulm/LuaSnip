@@ -1,15 +1,18 @@
-*luasnip.txt*            For NVIM v0.5.0           Last change: 2022 August 30
+*luasnip.txt*          For NVIM v0.5.0          Last change: 2022 September 09
 
 ==============================================================================
 Table of Contents                                  *luasnip-table-of-contents*
 
 1. BASICS                                                     |luasnip-basics|
+  - Jump-index                                            |luasnip-jump-index|
+  - Adding Snippets                                  |luasnip-adding-snippets|
 2. NODE                                                         |luasnip-node|
 3. SNIPPETS                                                 |luasnip-snippets|
   - Api:                                                        |luasnip-api:|
 4. TEXTNODE                                                 |luasnip-textnode|
 5. INSERTNODE                                             |luasnip-insertnode|
 6. FUNCTIONNODE                                         |luasnip-functionnode|
+  - NODE_REFERENCE                                    |luasnip-node_reference|
 7. CHOICENODE                                             |luasnip-choicenode|
 8. SNIPPETNODE                                           |luasnip-snippetnode|
 9. INDENTSNIPPETNODE                               |luasnip-indentsnippetnode|
@@ -17,6 +20,12 @@ Table of Contents                                  *luasnip-table-of-contents*
 11. RESTORENODE                                          |luasnip-restorenode|
 12. ABSOLUTE_INDEXER                                |luasnip-absolute_indexer|
 13. EXTRAS                                                    |luasnip-extras|
+  - Lambda                                                    |luasnip-lambda|
+  - Match                                                      |luasnip-match|
+  - Repeat                                                    |luasnip-repeat|
+  - Partial                                                  |luasnip-partial|
+  - Nonempty                                                |luasnip-nonempty|
+  - Dynamic Lambda                                    |luasnip-dynamic-lambda|
   - FMT                                                          |luasnip-fmt|
   - On The Fly snippets                          |luasnip-on-the-fly-snippets|
   - Select_choice                                      |luasnip-select_choice|
@@ -106,10 +115,41 @@ Snippets are always created using the `s(trigger:string,
 nodes:table)`-function. It is explained in more detail in |luasnip-snippets|,
 but the gist is that it creates a snippet that contains the nodes specified in
 `nodes`, which will be inserted into a buffer if the text before the cursor
-matches `trigger` when `expand` is called. The snippets for a given filetype
-have to be added to luasnip via `ls.add_snippets(filetype, snippets)`. Snippets
-that should be accessible globally (in all filetypes) have to be added to the
-special filetype `all`.
+matches `trigger` when `ls.expand` is called.
+
+JUMP-INDEX                                                *luasnip-jump-index*
+
+Nodes that can be jumped to (`insertNode`, `choiceNode`, `dynamicNode`,
+`restoreNode`, `snippetNode`) all require a "jump-index" so luasnip knows the
+order in which these nodes are supposed to be visited ("jumped to").
+
+>
+    s("trig", {
+        i(1), t"text", i(2), t"text again", i(3)
+    })
+<
+
+
+These indices don’t "run" through the entire snippet, like they do in
+textmate-snippets (`"$1 ${2: $3 $4}"`), they restart at 1 in each nested
+snippetNode:
+
+>
+    s("trig", {
+        i(1), t" ", sn(2, {
+            t" ", i(1), t" ", i(2)
+        })
+    })
+<
+
+
+(roughly equivalent to the given textmate-snippet).
+
+ADDING SNIPPETS                                      *luasnip-adding-snippets*
+
+The snippets for a given filetype have to be added to luasnip via
+`ls.add_snippets(filetype, snippets)`. Snippets that should be accessible
+globally (in all filetypes) have to be added to the special filetype `all`.
 
 >
     ls.add_snippets("all", {
@@ -353,7 +393,7 @@ textmate-snippet will expand correctly when parsed).
 `i(jump_index, text, node_opts)`
 
 
-- `jump_index`: `number`, this determines when this node will be jumped to.
+- |luasnip-`jump_index`|: `number`, this determines when this node will be jumped to.
 - `text`: `string|string[]`, a single string for just one line, a list with >1
     entries for multiple lines.
     This text will be SELECTed when the `insertNode` is jumped into.
@@ -410,18 +450,12 @@ for multiline-string, here all lines following the first will be prefixed with
 the snippets’ indentation.
 
 
-- `argnode_references`: List or just one of either:
-    - `number`: the jump-index of the argnode.
-        This will be resolved inside the parent of this `functionNode`.
-    - |luasnip-`absolute_indexer`|: the absolute position of the
-        argnode.
-    - `node`: the argnode. Usage of this is discouraged, since it can lead to
-        subtle errors (if the node passed here is for example captured in a
-        closure (there’s a big comment about just this in commit 8bfbd61)).
-    - `nil`: if there are no argnodes, the function will be evaluated once upon
-        expansion.
+- `argnode_references`: `node_reference[]|node_refernce|nil`. Either no, a
+    single, or multiple |luasnip-node-references|. Changing any of these will
+    trigger a re-evaluation of `fn`, and insertion of the updated text. If no
+    node-reference is passed, the `functionNode` is evaluated once upon expansion.
 - `node_opts`: `table`, see |luasnip-here|. One additional key is supported:
-    - `user_args`: any[], these will be passed to `fn` as `user_arg1`-`user_argn`.
+    - `user_args`: `any[]`, these will be passed to `fn` as `user_arg1`-`user_argn`.
         These make it easier to reuse similar functions, for example a functionNode
         that wraps some text in different delimiters (`()`, `[]`, …).
         >
@@ -483,6 +517,19 @@ the snippets’ indentation.
 If the function only performs simple operations on text, consider using the
 `lambda` from |luasnip-`luasnip.extras`|
 
+NODE_REFERENCE                                        *luasnip-node_reference*
+
+Node-references are used to refer to other nodes in various parts of
+luasnip’s API. For example, argnodes in functionNode, dynamicNode or lambda
+are node-references. These references can be either of: - `number`: the
+jump-index of the node. This will be resolved inside the parent of the node
+this is passed to. - |luasnip-`absolute_indexer`|: the absolute position of the
+node. This will come in handy if the referred-to node is not in the same
+snippet/snippetNode as the one this node-reference is passed to. - `node`: just
+the node. Usage of this is discouraged, since it can lead to subtle errors (if
+the node passed here is for example captured in a closure (there’s a big
+comment about just this in commit 8bfbd61)).
+
 ==============================================================================
 7. CHOICENODE                                             *luasnip-choicenode*
 
@@ -497,16 +544,16 @@ ChoiceNodes allow choosing between multiple nodes.
 <
 
 
-`c(jump_indx, choices, node_opts)` - `jump_indx`: `number`, since choiceNodes
-can be jumped to, they need their jump-indx. - `choices`: `node[]|node`, the
-choices. The first will be initialliy active. A list of nodes will be turned
-into a `snippetNode`. - `node_opts`, `table`. `choiceNode` supports the keys
-common to all nodes described |luasnip-here|, and one additional key: -
-`restore_cursor`: `false` by default. If it is set, and the node that was being
-edited also appears in the switched-to choice (can be the case if a
-`restoreNode` is present in both choice) the cursor is restored relative to
-that node. The default is `false` as enabling might lead to decreased
-performance. It’s possible to override the default by wrapping the
+`c(jump_index, choices, node_opts)` - |luasnip-`jump_index`|: `number`, since
+choiceNodes can be jumped to, they need their jump-indx. - `choices`:
+`node[]|node`, the choices. The first will be initialliy active. A list of
+nodes will be turned into a `snippetNode`. - `node_opts`: `table`. `choiceNode`
+supports the keys common to all nodes described |luasnip-here|, and one
+additional key: - `restore_cursor`: `false` by default. If it is set, and the
+node that was being edited also appears in the switched-to choice (can be the
+case if a `restoreNode` is present in both choice) the cursor is restored
+relative to that node. The default is `false` as enabling might lead to
+decreased performance. It’s possible to override the default by wrapping the
 `choiceNode`-constructor in another function that sets `opts.restore_cursor` to
 `true` and then using that to construct `choiceNode`s: `lua local function
 restore_cursor_choice(pos, choices, opts) if opts then opts.restore_cursor =
@@ -553,11 +600,11 @@ and any choice can be selected right away, via `vim.ui.select`.
 8. SNIPPETNODE                                           *luasnip-snippetnode*
 
 SnippetNodes directly insert their contents into the surrounding snippet. This
-is useful for choiceNodes, which only accept one child, or dynamicNodes, where
-nodes are created at runtime and inserted as a snippetNode.
+is useful for `choiceNode`s, which only accept one child, or `dynamicNode`s,
+where nodes are created at runtime and inserted as a `snippetNode`.
 
-Syntax is similar to snippets, however, where snippets require a table
-specifying when to expand, snippetNodes, similar to insertNodes, expect their
+Their syntax is similar to `s`, however, where snippets require a table
+specifying when to expand, `snippetNode`s, similar to `insertNode`s, expect a
 jump-index.
 
 >
@@ -568,8 +615,19 @@ jump-index.
 <
 
 
-Note that snippetNodes don’t accept an `i(0)`, so the jump-indices of the
-nodes inside them have to be in `1,2,...,n`.
+`sn(jump_index, nodes, node_opts)`
+
+
+- |luasnip-`jump_index`|: `number`, the usual.
+- `nodes`: `node[]|node`, just like for `s`.
+    Note that `snippetNode`s don’t accept an `i(0)`, so the jump-indices of the nodes
+    inside them have to be in `1,2,...,n`.
+- `node_opts`: `table`: again, all |luasnip-common| keys are supported, but also
+    - `callbacks`,
+    - `child_ext_opts` and
+    - `merge_child_ext_opts`,
+    which are further explained in |luasnip-`snippets`|.
+
 
 ==============================================================================
 9. INDENTSNIPPETNODE                               *luasnip-indentsnippetnode*
@@ -606,7 +664,19 @@ comment- string before the nodes of the snippet:
 
 Here the `//` before `This is` is important, once again, because indent is only
 applied after linebreaks. To enable such usage, `$PARENT_INDENT` in the
-indentstring is replaced by the parents’ indent (duh).
+indentstring is replaced by the parent’s indent (duh).
+
+`isn(jump_index, nodes, indentstring, node_opts)`
+
+All of these except `indentstring` are exactly the same as
+|luasnip-`snippetnode`|.
+
+
+- `indentstring`: `string`, will be used to indent the nodes inside this
+    `snippetNode`.
+    All occurences of `"$PARENT_INDENT"` are replaced with the actual indent of
+    the parent.
+
 
 ==============================================================================
 10. DYNAMICNODE                                          *luasnip-dynamicnode*
@@ -615,41 +685,39 @@ Very similar to functionNode, but returns a snippetNode instead of just text,
 which makes them very powerful as parts of the snippet can be changed based on
 user-input.
 
-The prototype for the dynamicNodes’ constructor is `d(jump_index:int,
-function, argnodes:table of nodes, opts: table)`:
+`d(jump_index, function, node-references, opts)`:
 
 
-1. `jump_index`: just like all jumpable nodes, its’ position in the jump-list.
-2. `function`: `fn(args, parent, old_state, user_args1, ..., user_argsn) -> snippetNode`
-This function is called when the argnodes’ text changes. It generates and
-returns (wrapped inside a `snippetNode`) the nodes that should be inserted
-at the dynamicNodes place.
-`args`, `parent` and `user_args` are also explained in
-|luasnip-functionnode|
+- |luasnip-`jump_index`|: `number`, just like all jumpable nodes, its’ position
+    in the jump-list.
+- `function`: `fn(args, parent, old_state, user_args) -> snippetNode` This
+    function is called when the argnodes’ text changes. It should generate and
+    returns (wrapped inside a `snippetNode`) nodes, these will be inserted at the
+    dynamicNodes place. `args`, `parent` and `user_args` are also explained in
+    |luasnip-functionnode|
+    - `args`: `table of text` (`{{"node1line1", "node1line2"}, {"node2line1"}}`)
+        from nodes the `dynamicNode` depends on.
+    - `parent`: the immediate parent of the `dynamicNode`.
+    - `old_state`: a user-defined table. This table may contain anything, its
+        intended usage is to preserve information from the previously generated
+        `snippetNode`: If the `dynamicNode` depends on other nodes it may be
+        reconstructed, which means all user input (text inserted in `insertNodes`,
+        changed choices) to the previous dynamicNode is lost.
+        The `old_state` table must be stored in `snippetNode` returned by
+        the function (`snippetNode.old_state`).
+        The second example below illustrates the usage of `old_state`.
+    - `user_args`: passed through from `dynamicNode`-opts, may be more than one
+        argument.
+- `node_references`: `node_reference[]|node_references|nil`, |luasnip-references|
+    to the nodes the dynamicNode depends on: if any of these trigger an update (for
+    example if the text inside them changes), the `dynamicNode`s’ function will
+    be executed, and the result inserted at the `dynamicNodes` place.
+    (`dynamicNode` behaves exactly the same as `functionNode` in this regard).
+- `opts`: In addition to the |luasnip-usual| keys, there is, again,
+    - `user_args`, which is described in |luasnip-functionnode|.
 
 
-- `args`: `table of text` (`{{"node1line1", "node1line2"}, {"node2line1"}}`)
-    from nodes the dynamicNode depends on.
-- `parent`: the immediate parent of the `dynamicNode`).
-- `old_state`: a user-defined table. This table may contain
-    anything, its intended usage is to preserve information from the previously
-    generated `snippetNode`: If the `dynamicNode` depends on other nodes it may
-    be reconstructed, which means all user input (text inserted in `insertNodes`,
-    changed choices) to the previous dynamicNode is lost.
-    The `old_state` table must be stored in `snippetNode` returned by
-    the function (`snippetNode.old_state`).
-    The second example below illustrates the usage of `old_state`.
-- `user_args1, ..., user_argsn`: passed through from `dynamicNode`-opts.
-
-3. `argnodes`: Indices of nodes the dynamicNode depends on: if any of these trigger an
-update, the `dynamicNode`s’ function will be executed, and the result inserted at
-the `dynamicNodes` place.
-Can be a single index or a table of indices.
-4. `opts`: Just like `functionNode`, `dynamicNode` also accepts `user_args` in
-addition to options common to all nodes.
-
-
-Examples:
+**Examples**:
 
 This `dynamicNode` inserts an `insertNode` which copies the text inside the
 first `insertNode`.
@@ -708,9 +776,8 @@ functions.
 ==============================================================================
 11. RESTORENODE                                          *luasnip-restorenode*
 
-This node can store and restore a snippetNode that was modified (changed
-choices, inserted text) by the user. Its usage is best demonstrated by an
-example:
+This node can store and restore a snippetNode as-is. This includes changed
+choices and changed text. Its’ usage is best demonstrated by an example:
 
 >
     s("paren_change", {
@@ -721,7 +788,8 @@ example:
         }),
     }, {
         stored = {
-            user_text = i(1, "default_text")
+            -- key passed to restoreNodes.
+            ["user_text"] = i(1, "default_text")
         }
     })
 <
@@ -729,16 +797,21 @@ example:
 
 Here the text entered into `user_text` is preserved upon changing choice.
 
-The constructor for the restoreNode, `r`, takes (at most) three parameters: -
-`jump_index`, when to jump to this node. - `key`, the key that identifies which
-`restoreNode`s should share their content. - `nodes`, the contents of the
-`restoreNode`. Can either be a single node, or a table of nodes (both of which
-will be wrapped inside a `snippetNode`, except if the single node already is a
-`snippetNode`). The content of a given key may be defined multiple times, but
-if the contents differ, it’s undefined which will actually be used. If a keys
-content is defined in a `dynamicNode`, it will not be used for `restoreNodes`
-outside that `dynamicNode`. A way around this limitation is defining the
-content in the `restoreNode` outside the `dynamicNode`.
+`r(jump_index, key, nodes, node_opts)`:
+
+
+- |luasnip-`jump_index`|, when to jump to this node.
+- `key`, `number`: `restoreNode`s with the same key share their content.
+- `nodes`, `node[]|node`: the content of the `restoreNode`.
+    Can either be a single node, or
+    a table of nodes (both of which will be wrapped inside a `snippetNode`,
+    except if the single node already is a `snippetNode`).
+    The content for a given key may be defined multiple times, but if the
+    contents differ, it’s undefined which will actually be used.
+    If a keys content is defined in a `dynamicNode`, it will not be used for
+    `restoreNodes` outside that `dynamicNode`. A way around this limitation is
+    defining the content in the `restoreNode` outside the `dynamicNode`.
+
 
 The content for a key may also be defined in the `opts`-parameter of the
 snippet-constructor, as seen in the example above. The `stored`-table accepts
@@ -749,7 +822,7 @@ An important-to-know limitation of `restoreNode` is that, for a given key, only
 one may be visible at a time. See this issue
 <https://github.com/L3MON4D3/LuaSnip/issues/234> for details.
 
-The `restoreNode` is also useful for storing user-input across updates of a
+The `restoreNode` is especially useful for storing input across updates of a
 `dynamicNode`. Consider this:
 
 >
@@ -788,10 +861,11 @@ that really bothers you feel free to open an issue.
 ==============================================================================
 12. ABSOLUTE_INDEXER                                *luasnip-absolute_indexer*
 
-The `absolute_indexer` can be used to pass text of nodes to a
-function/dynamicNode that it doesn’t share a parent with. Normally, accessing
-the outer `i(1)` isn’t possible from inside e.g. a snippetNode (nested
-inside a choiceNode to make this example more practical):
+A more capable way of |luasnip-referencing-nodes|! Using only
+|luasnip-`jump-indices`|, accessing an outer `i(1)` isn’t possible from
+inside e.g. a snippetNode, since only nodes with the same parent can be
+referenced. The `absolute_indexer` can be used to reference nodes based on
+their absolute position in the snippet, which lifts this restriction.
 
 >
     s("trig", {
@@ -867,89 +941,134 @@ to be accessed as `ai[restoreNodeIndx][0][1]`.
 ==============================================================================
 13. EXTRAS                                                    *luasnip-extras*
 
-The module `"luasnip.extras"` contains nodes that ease writing snippets (This
-is only a short outline, their usage is shown more expansively in
-`Examples/snippets.lua`):
+LAMBDA                                                        *luasnip-lambda*
+
+A shortcut for `functionNode`s that only do very basic string- manipulation.
+`l(lambda, argnodes)`: - `lambda`: An object created by applying
+string-operations to `l._n`, objects representing the `n`th argnode. For
+example: - `l._1:gsub("a", "e")` replaces all occurences of "a" in the text of
+the first argnode with "e", or - `l._1 .. l._2` concats text of the first and
+second argnode. If an argnode contains multiple lines of text, they are
+concatenated with `"\n"` prior to any operation. - `argnodes`,
+|luasnip-`node-references`|, just like in function- and dynamicNode.
+
+There are many examples for `lamda` in `Examples/snippets.lua`
+
+MATCH                                                          *luasnip-match*
+
+`match` can insert text based on a predicate (again, a shorthand for
+`functionNode`).
+
+`match(argnodes, condition, then, else)`, where * `argnode`: A single
+|luasnip-`node-reference`|. May not be nil, or a table. * `condition` may be
+either of * `string`: interpreted as a lua-pattern. Matched on the `\n`-joined
+(in case it’s multiline) text of the first argnode
+(`args[1]:match(condition)`). * `function`: `fn(args, snip) -> bool`: takes the
+same parameters as the `functionNode`-function, any value other than nil or
+false is interpreted as a match. * `lambda`: `l._n` is the `\n`-joined text of
+the nth argnode. Useful if string-manipulations have to be performed before the
+string is matched. Should end with `match`, but any other truthy result will be
+interpreted as matching.
 
 
-- `lambda`: A shortcut for `functionNode`s that only do very basic string-
-    manipulation. For example, to generate text where all occurences of "a" in the
-    text of the node with jump-index `n` are replaced with "e", one could use
-    `lambda(lambda._1:gsub("a", "e"), n)` (signature is similar to that of
-    `functionNode`). `lambda._n` returns the text of the `n`th argnode (`args[n]`,
-    in the functionNode-function). If this text has multiple lines, they are
-    concatenated with "".
-- `match`: Can insert text based on a predicate (shorthand for `functionNode`s).
-    The complete signature for the node is `match(argnodes, condition, then,
-    else)`, where
-    - `argnodes` can be specified as in `functionNode`,
-    - `condition` may be a
-        - string: interpreted as a lua-pattern. Matched on the `\n`-joined (in case
-            it’s multiline) text of the first argnode (`args[1]:match(condition)`).
-        - function: `fn(args, snip) -> bool`: takes the same parameters as the
-            `functionNode`-function, any value other than nil or false is interpreted
-            as a match.
-        - lambda: `l._n` is the `\n`-joined text of the nth argnode.
-            Useful if string-manipulations have to be performed before the string is matched.
-    - `then` is inserted if the condition matches, `else` if it doesn’t. They can
-        both be either text, lambda or function (with the same parameters as
-        specified above).
-        If `then` is not given, the `then`-value depends on what was specified as the
-        `condition`:
-        - pattern: Simply the return value from the `match`, e.g. the entire match,
-            or, if there were capture groups, the first capture group.
-        - function: the return value of the function if it is either a string, or a
-            table (if there is no `then`, the function cannot return a table containing
-            something other than strings).
-        - lambda: Simply the first value returned by the lambda.
-    Examples:
-    - `match(n, "^ABC$", "A")` inserts "A" if the node with jump-index `n` matches
-        "ABC" exactly, nothing otherwise.
-    - `match(n, lambda._1:match(lambda._1:reverse()), "PALINDROME")` inserts
-        "PALINDROME" if the node with jump-index `n`th palindrome.
-        >
-            s("trig", {
-                i(1), t":",
-                i(2), t"::",
-                m({1, 2}, l._1:match("^"..l._2.."$"), l._1:gsub("a", "e"))
-            })
-        <
-        This inserts the text of the node with jump-index 1, with all occurences of `a`
-        replaced with `e` if the second insertNode matches the first exactly.
-- `rep`: repeats the node with the passed index. For example `rep(1)` to repeat
-    the content of the node at jump-index 1.
-- `partial`: directly inserts the output of a function. Useful for
-    e.g. `partial(os.date, "%Y")` (all arguments passed after the function are
-    passed to it).
-- `nonempty`: inserts text if the node at the given jump-index doesn’t contain
-    any text. `nonempty(n, "not empty!", "empty!")` inserts "empty!" if the node at
-    jump-index n is empty, "not empty!" if it isn’t.
-- `dynamic_lambda`: Operates almost exactly like `lambda`, only that it can be
-    jumped to, and its’ contents therefore easily overridden (this is basically a
-    dynamicNode generating a single insertNode). `dynamic_lambda(2,
-    lambda._1..lambda._1, 1)` will first contain the content of the node at
-    jump-index 1 appended to itself, but the second jump (jump-index is 2) will
-    lead to it, making it easy to override the generated text. The text will only
-    be changed when an argnode updates it.
+- `then` is inserted if the condition matches,
+- `else` if it does not.
 
+
+Both `then` and `else` can be either text, lambda or function (with the same
+parameters as specified above). `then`’s default-value depends on the
+`condition`: * `pattern`: Simply the return value from the `match`, e.g. the
+entire match, or, if there were capture groups, the first capture group. *
+`function`: the return value of the function if it is either a string, or a
+table (if there is no `then`, the function cannot return a table containing
+something other than strings). * `lambda`: Simply the first value returned by
+the lambda.
+
+Examples: * `match(n, "^ABC$", "A")`. * `match(n,
+lambda._1:match(lambda._1:reverse()), "PALINDROME")`
 
 >
-    ls.add_snippets("all", {
-      s("extras1", {
-        i(1), t { "", "" }, m(1, "^ABC$", "A")
-      }),
-      s("extras2", {
-        i(1, "INPUT"), t { "", "" }, m(1, l._1:match(l._1:reverse()), "PALINDROME")
-      }),
-      s("extras3", {
-        i(1), t { "", "" }, i(2), t { "", "" },
-        m({ 1, 2 }, l._1:match("^" .. l._2 .. "$"), l._1:gsub("a", "e"))
-      }),
-      s("extras4", { i(1), t { "", "" }, extras.rep(1) }),
-      s("extras5", { extras.partial(os.date, "%Y") }),
-      s("extras6", { i(1, ""), t { "", "" }, extras.nonempty(1, "not empty!", "empty!") }),
-      s("extras7", { i(1), t { "", "" }, extras.dynamic_lambda(2, l._1 .. l._1, 1) }),
+    s("trig", {
+      i(1), t":",
+      i(2), t"::",
+      m({1, 2}, l._1:match("^"..l._2.."$"), l._1:gsub("a", "e"))
     })
+<
+
+
+
+- >
+            s("extras1", {
+              i(1), t { "", "" }, m(1, "^ABC$", "A")
+            }),
+    <
+    Inserts "A" if the node with jump-index `n` matches "ABC" exactly, nothing
+    otherwise.
+- >
+          s("extras2", {
+            i(1, "INPUT"), t { "", "" }, m(1, l._1:match(l._1:reverse()), "PALINDROME")
+          }),
+    <
+    Inserts `"PALINDROME"` if i(1) contains a palindrome.
+- >
+          s("extras3", {
+            i(1), t { "", "" }, i(2), t { "", "" },
+            m({ 1, 2 }, l._1:match("^" .. l._2 .. "$"), l._1:gsub("a", "e"))
+          }),
+    <
+    This inserts the text of the node with jump-index 1, with all occurences of `a`
+    replaced with `e`, if the second insertNode matches the first exactly.
+
+
+REPEAT                                                        *luasnip-repeat*
+
+Inserts the text of the passed node.
+
+`rep(node_reference)` - `node_reference`, a single |luasnip-`node-reference`|.
+
+>
+    s("extras4", { i(1), t { "", "" }, extras.rep(1) }),
+<
+
+
+PARTIAL                                                      *luasnip-partial*
+
+Evaluates a function on expand and inserts its’ value.
+
+`partial(fn, params...)` - `fn`: any function - `params`: varargs, any, will be
+passed to `fn`.
+
+For example `partial(os.date, "%Y")` inserts the current year on expansion.
+
+>
+    s("extras5", { extras.partial(os.date, "%Y") }),
+<
+
+
+NONEMPTY                                                    *luasnip-nonempty*
+
+Inserts text if the referenced node doesn’t contain any text.
+`nonempty(node_reference, not_empty, empty)` - `node_reference`, a single
+|luasnip-node-reference|. - `not_empty`, `string`: inserted if the node is not
+empty. - `empty`, `string`: inserted if the node is empty.
+
+>
+    s("extras6", { i(1, ""), t { "", "" }, extras.nonempty(1, "not empty!", "empty!") }),
+<
+
+
+DYNAMIC LAMBDA                                        *luasnip-dynamic-lambda*
+
+Pretty much the same as lambda, it just inserts the resulting text as an
+insertNode, and, as such, it can be quickly overridden.
+
+`dynamic_lambda(jump_indx, lambda, node_references)` - `jump_indx`, as usual,
+the jump-indx.
+
+The remaining arguments carry over from lambda.
+
+>
+    s("extras7", { i(1), t { "", "" }, extras.dynamic_lambda(2, l._1 .. l._1, 1) }),
 <
 
 
